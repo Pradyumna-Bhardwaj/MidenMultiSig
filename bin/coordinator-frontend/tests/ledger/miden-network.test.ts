@@ -30,3 +30,29 @@ describe('registration invitation code per network', () => {
     expect(() => registrationInvitationCode('mainnet', 'guardian', '  ')).toThrow(/invitation code is required/);
   });
 });
+
+describe('funding and invitation codes (review of 0xMiden/MultiSig#33)', () => {
+  it('waits for a funding note only on testnet', async () => {
+    const { fundsOnRegistration } = await import('../../src/lib/midenNetwork');
+    expect(fundsOnRegistration('testnet')).toBe(true);
+    for (const network of ['devnet', 'mainnet', 'local', 'custom'] as const) expect(fundsOnRegistration(network)).toBe(false);
+  });
+
+  it('checks a required invitation code with the node first, passing on its error', async () => {
+    const { assertInvitationCodeValid } = await import('../../src/lib/midenNetwork');
+    const { UserFacingError } = await import('../../src/lib/errors');
+    await expect(assertInvitationCodeValid({ isInvitationCodeValid: async () => true }, 'INVITE-1')).resolves.toBeUndefined();
+    const rejected = assertInvitationCodeValid({ isInvitationCodeValid: async () => false }, 'TYPO');
+    await expect(rejected).rejects.toThrow(/node rejected this invitation code.*nothing was created/);
+    await expect(rejected).rejects.toBeInstanceOf(UserFacingError);
+    await expect(assertInvitationCodeValid({ isInvitationCodeValid: async () => { throw new Error('INVITATION_NOT_FOUND'); } }, 'X'))
+      .rejects.toThrow('The node could not check the invitation code: INVITATION_NOT_FOUND');
+  });
+
+  it('goes ahead when the node predates the check (UNIMPLEMENTED on testnet/devnet 0.17.1)', async () => {
+    const { assertInvitationCodeValid } = await import('../../src/lib/midenNetwork');
+    // The SDK 0.17.3 message, as returned live by rpc.testnet.miden.io on 2026-10-12.
+    const unimplemented = new Error("failed to check whether the invitation code is valid: RPC error: grpc request failed for is_invitation_code_valid: the requested method is not implemented by this version of the Miden node: code: 'Operation is not implemented or not supported'");
+    await expect(assertInvitationCodeValid({ isInvitationCodeValid: async () => { throw unimplemented; } }, 'CODE')).resolves.toBeUndefined();
+  });
+});

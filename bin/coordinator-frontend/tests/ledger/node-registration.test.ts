@@ -31,13 +31,13 @@ afterEach(() => {
 
 describe('registerAccountOnNode', () => {
   it.each(['https://rpc.devnet.example', 'https://rpc.devnet.example:8443/'])(
-    'devnet (%s) registers with the invitation code (which funds the account), once for concurrent calls',
+    'devnet (%s) registers with the deployment\'s invitation code, once for concurrent calls',
     async (rpc) => {
       const { run, calls } = await setup({ network: 'devnet', rpc });
       const first = run();
       expect(run()).toBe(first);
       await first;
-      expect(calls.register).toEqual([{ url: rpc, code: 'guardian' }]);
+      expect(calls.register).toEqual([{ url: new URL(rpc).origin, code: 'guardian' }]);
       expect(calls.isAllowed).toBe(0);
     },
   );
@@ -75,6 +75,14 @@ describe('registerAccountOnNode', () => {
     },
   );
 
+  it('keeps the original error when the node cannot answer isAllowed', async () => {
+    const { calls } = await setup({ rpcError: new Error('ALREADY_REGISTERED') });
+    const client = { accounts: { isAllowed: async () => { throw new Error('isAllowed unavailable'); } } };
+    const { registerAccountOnNode } = await import('../../src/lib/multisigApi');
+    await expect(registerAccountOnNode(client as never, '0x5678')).rejects.toThrow('ALREADY_REGISTERED');
+    expect(calls.register).toHaveLength(1);
+  });
+
   it('propagates real RPC errors and lets a failed request be retried', async () => {
     const error = new Error('funding service rejected account funding request');
     const { run, calls } = await setup({ network: 'testnet', rpcError: error });
@@ -82,5 +90,30 @@ describe('registerAccountOnNode', () => {
     await expect(run()).rejects.toBe(error);
     expect(calls.register).toHaveLength(2);
     expect(calls.isAllowed).toBe(0);
+  });
+});
+
+describe('nodeRegistrationMissing (checked on load)', () => {
+  const accounts = (nonce: bigint | null, allowed: boolean) => {
+    const calls = { isAllowed: 0 };
+    return {
+      calls,
+      accounts: {
+        get: async () => (nonce === null ? null : { nonce: () => ({ asInt: () => nonce }) }),
+        isAllowed: async () => { calls.isAllowed++; return allowed; },
+      },
+    };
+  };
+
+  it('asks the node only for an account with no transaction yet', async () => {
+    await setup({ network: 'mainnet' });
+    const { nodeRegistrationMissing } = await import('../../src/lib/multisigApi');
+    const unregistered = accounts(0n, false);
+    expect(await nodeRegistrationMissing(unregistered.accounts as never, '0x1234')).toBe(true);
+    expect(await nodeRegistrationMissing(accounts(0n, true).accounts as never, '0x1234')).toBe(false);
+    const onChain = accounts(3n, false);
+    expect(await nodeRegistrationMissing(onChain.accounts as never, '0x1234')).toBe(false);
+    expect(onChain.calls.isAllowed).toBe(0);
+    expect(await nodeRegistrationMissing(accounts(null, false).accounts as never, '0x1234')).toBe(false);
   });
 });
