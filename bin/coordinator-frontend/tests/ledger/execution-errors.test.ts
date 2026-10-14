@@ -18,6 +18,15 @@ describe('describeExecutionError', () => {
     );
   });
 
+  it("explains Guardian 0.18.1's refusal of a proposal made for another account state, advice included", () => {
+    quiet();
+    const word = (c: string) => `0x${c.repeat(64)}`;
+    const stale = new Error(`Proposal ${word('a')} was made for account state ${word('b')}, but this client's account is at ${word('c')}: sync and retry, or create the proposal again`);
+    expect(describeExecutionError(stale, 'Execute failed')).toBe(
+      'Execute failed: this proposal was made for an earlier state of the account. Sync and try again; if it still fails, create it again.',
+    );
+  });
+
   it('reports a local database failure as such, not as a network problem', () => {
     quiet();
     const store = new Error('failed to execute transaction: storage error: database-related non-query error: failed to fetch account snapshot: JsValue(Object({"name":"PrematureCommitError","message":"Transaction committed too early. See http://bit.ly/2kdckMn","inner":null}))');
@@ -27,6 +36,14 @@ describe('describeExecutionError', () => {
     expect(describeExecutionError(new TypeError('Failed to fetch'), 'Execute failed')).toBe(
       'Execute failed: could not reach the network. Check your connection and try again.',
     );
+  });
+
+  it("treats only the browser's own fetch failure as a network problem", () => {
+    quiet();
+    expect(describeExecutionError(new Error('JS API error: TypeError: Failed to fetch'), 'Execute failed')).toMatch(/could not reach the network/);
+    expect(describeExecutionError(new Error('NetworkError when attempting to fetch resource.'), 'Execute failed')).toMatch(/could not reach the network/);
+    expect(describeExecutionError(new Error('failed to fetch transaction inputs from the data store: x'), 'Execute failed'))
+      .not.toMatch(/could not reach the network/);
   });
 
   it("uses Guardian's user-safe message rather than raw bodies", () => {

@@ -1,3 +1,11 @@
+/**
+ * An error whose message is written for the user: handlers show it as it is,
+ * never reworded into a wallet or network error.
+ */
+export class UserFacingError extends Error {
+  override name = 'UserFacingError';
+}
+
 export function formatError(err: unknown, prefix?: string): string {
   const message =
     err instanceof Error
@@ -47,12 +55,22 @@ export function describeExecutionError(err: unknown, prefix: string): string {
   if (lower.includes('failed to submit proven transaction')) {
     return `${prefix}: the Miden node rejected the transaction. Sync and try again.`;
   }
+  // Guardian 0.18.1 refuses, before anything is pushed, to execute a proposal
+  // made for another account state than this client holds (its message names
+  // two 64-hex commitments, which would push its advice past the cut-off).
+  if (lower.includes('was made for account state')) {
+    return `${prefix}: this proposal was made for an earlier state of the account. Sync and try again; if it still fails, create it again.`;
+  }
   // Before the network check: "failed to fetch account snapshot" is a local
   // IndexedDB failure, not a network one.
   if (lower.includes('database-related') || lower.includes('prematurecommiterror')) {
     return `${prefix}: this browser's local Miden data could not be read. Reload the page and try again.`;
   }
-  if (lower.includes('failed to fetch') || lower.includes('networkerror')) {
+  // The browser's own network failure ("TypeError: Failed to fetch" in
+  // Chromium, "NetworkError when attempting to fetch resource" in Firefox),
+  // not SDK messages such as "failed to fetch transaction inputs from the data
+  // store", which are lower-case.
+  if (raw.includes('Failed to fetch') || raw.includes('NetworkError')) {
     return `${prefix}: could not reach the network. Check your connection and try again.`;
   }
 
